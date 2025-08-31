@@ -85,9 +85,9 @@ def main():
     P_estimate = P.copy()
     strk_trks = np.zeros(2000)  # strike counter for tracks
 
-    nF = 0  # number of track estimates
+    track_estimate_count = 0  # number of track estimates
 
-    MAX_FRAME = 100
+    MAX_FRAME = 20
     for t in range(S_frame, MAX_FRAME):
         print(f"Processing frame {t}")
 
@@ -103,20 +103,20 @@ def main():
             current_x, current_y = find_objects(img_tmp)
             if len(current_x) > 0:
                 Q_loc_meas = np.column_stack([current_x, current_y])
-                nD = len(current_x)
+                detection_count = len(current_x)
             else:
                 Q_loc_meas = np.array([]).reshape(0, 2)
-                nD = 0
+                detection_count = 0
         except Exception as e:
             print(f"Error detecting objects in frame {t}: {e}")
             Q_loc_meas = np.array([]).reshape(0, 2)
-            nD = 0
+            detection_count = 0
 
         ## Kalman Filter Prediction
         # Predict next state for all active tracks
-        for F in range(nF):
-            if not np.isnan(Q_estimate[0, F]):
-                Q_estimate[:, F] = A @ Q_estimate[:, F] + (B * u).flatten()
+        for n_estimate in range(track_estimate_count):
+            if not np.isnan(Q_estimate[0, n_estimate]):
+                Q_estimate[:, n_estimate] = A @ Q_estimate[:, n_estimate] + (B * u).flatten()
 
         # Predict next covariance
         P = A @ P @ A.T + Ex
@@ -125,15 +125,15 @@ def main():
         K = P @ C.T @ np.linalg.inv(C @ P @ C.T + Ez)
 
         ## Assignment of detections to tracks
-        if nD > 0 and nF > 0:
+        if detection_count > 0 and track_estimate_count > 0:
             # Create distance matrix
             active_tracks = []
             active_positions = []
 
-            for F in range(nF):
-                if not np.isnan(Q_estimate[0, F]):
-                    active_tracks.append(F)
-                    active_positions.append([Q_estimate[0, F], Q_estimate[1, F]])
+            for n_estimate in range(track_estimate_count):
+                if not np.isnan(Q_estimate[0, n_estimate]):
+                    active_tracks.append(n_estimate)
+                    active_positions.append([Q_estimate[0, n_estimate], Q_estimate[1, n_estimate]])
 
             if len(active_positions) > 0:
                 active_positions = np.array(active_positions)
@@ -156,11 +156,11 @@ def main():
                 asgn = asgn * rej.astype(int)
 
                 # Apply updates
-                for i, (F, assignment) in enumerate(zip(active_tracks, asgn)):
+                for i, (n_estimate, assignment) in enumerate(zip(active_tracks, asgn)):
                     if assignment > 0:
                         measurement = Q_loc_meas[assignment-1, :]  # -1 for 0-indexing
-                        innovation = measurement - C @ Q_estimate[:, F]
-                        Q_estimate[:, F] = Q_estimate[:, F] + K @ innovation
+                        innovation = measurement - C @ Q_estimate[:, n_estimate]
+                        Q_estimate[:, n_estimate] = Q_estimate[:, n_estimate] + K @ innovation
         else:
             asgn = np.array([])
 
@@ -168,20 +168,20 @@ def main():
         P = (np.eye(4) - K @ C) @ P
 
         ## Store data
-        Q_loc_estimateX[t, :nF] = Q_estimate[0, :nF]
-        Q_loc_estimateY[t, :nF] = Q_estimate[1, :nF]
+        Q_loc_estimateX[t, :track_estimate_count] = Q_estimate[0, :track_estimate_count]
+        Q_loc_estimateY[t, :track_estimate_count] = Q_estimate[1, :track_estimate_count]
 
         ## Handle new detections and lost tracks
-        if nD > 0:
+        if detection_count > 0:
             # Find unassigned detections (new tracks)
             if len(asgn) > 0:
                 assigned_detections = asgn[asgn > 0] - 1  # Convert to 0-indexing
                 unassigned = []
-                for i in range(nD):
+                for i in range(detection_count):
                     if i not in assigned_detections:
                         unassigned.append(i)
             else:
-                unassigned = list(range(nD))
+                unassigned = list(range(detection_count))
 
             # Create new tracks for unassigned detections
             if unassigned:
@@ -189,18 +189,18 @@ def main():
                 n_new = len(unassigned)
 
                 # Add new tracks
-                Q_estimate[0, nF:nF+n_new] = new_positions[:, 0]
-                Q_estimate[1, nF:nF+n_new] = new_positions[:, 1]
-                Q_estimate[2, nF:nF+n_new] = 0  # zero velocity
-                Q_estimate[3, nF:nF+n_new] = 0  # zero velocity
+                Q_estimate[0, track_estimate_count:track_estimate_count+n_new] = new_positions[:, 0]
+                Q_estimate[1, track_estimate_count:track_estimate_count+n_new] = new_positions[:, 1]
+                Q_estimate[2, track_estimate_count:track_estimate_count+n_new] = 0  # zero velocity
+                Q_estimate[3, track_estimate_count:track_estimate_count+n_new] = 0  # zero velocity
 
-                nF += n_new
+                track_estimate_count += n_new
 
         # Give strikes to unmatched tracks
         if len(asgn) > 0:
             no_match = np.where(asgn == 0)[0]
             if len(no_match) > 0:
-                active_track_indices = [i for i in range(min(nF, len(strk_trks)))
+                active_track_indices = [i for i in range(min(track_estimate_count, len(strk_trks)))
                                       if not np.isnan(Q_estimate[0, i])]
                 for idx in no_match:
                     if idx < len(active_track_indices):
