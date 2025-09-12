@@ -127,6 +127,53 @@ def find_objects(img_tmp):
     return X_frame, Y_frame
 
 
+def find_objects_canny(img_tmp, canny_low=100, canny_high=200, min_area=15, blur_kernel_size=5):
+    """
+    Alternative detector using Gaussian blur + Canny edges + contour centroids.
+    Returns (X_frame, Y_frame) with row (x) and col (y) coordinates.
+    """
+    # Convert to grayscale (match detect_edges channel behavior)
+    if len(img_tmp.shape) == 3:
+        gray = img_tmp[:, :, 0]
+    else:
+        gray = img_tmp
+
+    # Ensure uint8 for Canny
+    if gray.dtype != np.uint8:
+        gmin, gmax = float(np.nanmin(gray)), float(np.nanmax(gray))
+        if gmax > gmin:
+            gray_u8 = ((gray - gmin) / (gmax - gmin) * 255.0).astype(np.uint8)
+        else:
+            gray_u8 = np.zeros_like(gray, dtype=np.uint8)
+    else:
+        gray_u8 = gray
+
+    # Apply Gaussian blur to reduce noise before edge detection
+    blurred = cv2.GaussianBlur(gray_u8, (blur_kernel_size, blur_kernel_size), 0)
+    edges = cv2.Canny(blurred, canny_low, canny_high)
+    # Connect edges slightly to form contours
+    kernel = np.ones((3, 3), np.uint8)
+    edges = cv2.dilate(edges, kernel, iterations=1)
+
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    xs = []
+    ys = []
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if area < min_area:
+            continue
+        m = cv2.moments(cnt)
+        if m["m00"] == 0:
+            continue
+        cy = m["m10"] / m["m00"]  # column
+        cx = m["m01"] / m["m00"]  # row
+        xs.append(int(round(cx)))
+        ys.append(int(round(cy)))
+
+    if len(xs) == 0:
+        return np.array([]), np.array([])
+    return np.array(xs), np.array(ys)
+
 ## Initialize Gaussian filter
 # Parameters for LoG filter - you may need to adjust these values
 hsizeh = 30  # Filter size - larger values detect larger blobs

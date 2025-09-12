@@ -42,9 +42,9 @@ def main():
 
     # Define process and measurement parameters
     u = 0  # acceleration magnitude
-    HexAccel_noise_mag = 1  # process noise magnitude
-    tkn_x = 0.1  # measurement noise in x direction
-    tkn_y = 0.1  # measurement noise in y direction
+    HexAccel_noise_mag = 0.1  # process noise magnitude
+    tkn_x = 0.01  # measurement noise in x direction
+    tkn_y = 0.01  # measurement noise in y direction
 
     # Measurement noise covariance matrix
     Ez = np.array([[tkn_x, 0], [0, tkn_y]])
@@ -87,7 +87,7 @@ def main():
 
     track_estimate_count = 0  # number of track estimates
 
-    MAX_FRAME = 20
+    MAX_FRAME = 50
     for t in range(S_frame, MAX_FRAME):
         print(f"Processing frame {t}")
 
@@ -141,19 +141,20 @@ def main():
                 # Calculate distances between tracks and detections
                 all_points = np.vstack([active_positions, Q_loc_meas])
                 distances = squareform(pdist(all_points))
+                # take uppper right quadrant rows are active_tracks and columns are detections
                 est_dist = distances[:len(active_positions), len(active_positions):]
 
                 # Optimal assignment
                 asgn, cost = assignment_optimal(est_dist)
 
-                # Reject assignments that are too far (distance > 50)
-                rej = np.zeros(len(asgn), dtype=bool)
+                # Accept assignments that are not too far (distance < 50)
+                accept = np.zeros(len(asgn), dtype=bool)
                 for i, assignment in enumerate(asgn):
                     if assignment > 0:
                         if est_dist[i, assignment-1] < 50:  # -1 for 0-indexing
-                            rej[i] = True
+                            accept[i] = True
 
-                asgn = asgn * rej.astype(int)
+                asgn = asgn * accept.astype(int)
 
                 # Apply updates
                 for i, (n_estimate, assignment) in enumerate(zip(active_tracks, asgn)):

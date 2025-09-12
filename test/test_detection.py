@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from fly_detect import find_objects, extrema2d, detect_edges
+from fly_detect import find_objects, extrema2d, detect_edges, find_objects_canny
 
 
 def test_detect_edges():
@@ -51,3 +51,21 @@ def test_find_objects():
     assert np.all(Y >= 0) and np.all(Y < img.shape[1]), "Y coordinates out of bounds"
 
     print("test_find_objects passed!")
+
+
+def test_find_objects_canny_synthetic():
+    # Create simple synthetic image with two rectangles
+    img = np.zeros((100, 100), dtype=np.uint8)
+    cv2.rectangle(img, (10, 10), (20, 20), 255, -1)
+    cv2.rectangle(img, (60, 60), (80, 80), 255, -1)
+
+    X, Y = find_objects_canny(img, canny_low=50, canny_high=150, min_area=10)
+
+    # Should detect two components roughly centered
+    assert len(X) == len(Y) and len(X) >= 2
+    # Check centers are near expected
+    centers = list(zip(X.tolist(), Y.tolist()))
+    # Expect around (15,15) and (70,70)
+    assert any(abs(x-15) <= 3 and abs(y-15) <= 3 for x, y in centers)
+    assert any(abs(x-70) <= 5 and abs(y-70) <= 5 for x, y in centers)
+    print("test_find_objects_canny_synthetic passed!")
