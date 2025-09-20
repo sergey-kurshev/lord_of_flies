@@ -107,6 +107,7 @@ def main():
             else:
                 Q_loc_meas = np.array([]).reshape(0, 2)
                 detection_count = 0
+
         except Exception as e:
             print(f"Error detecting objects in frame {t}: {e}")
             Q_loc_meas = np.array([]).reshape(0, 2)
