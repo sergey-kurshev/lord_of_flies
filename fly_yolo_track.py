@@ -1,0 +1,299 @@
+import time
+import numpy as np
+import matplotlib.pyplot as plt
+import cv2
+from scipy.spatial.distance import pdist, squareform
+from scipy.optimize import linear_sum_assignment
+from yolo_detector import YOLODetector
+
+def assignment_optimal(cost_matrix):
+    """
+    Hungarian algorithm for optimal assignment
+    Returns assignment indices and total cost
+    """
+    row_indices, col_indices = linear_sum_assignment(cost_matrix)
+    total_cost = cost_matrix[row_indices, col_indices].sum()
+
+    # Create assignment array (1-indexed like MATLAB, 0 means no assignment)
+    assignment = np.zeros(cost_matrix.shape[0], dtype=int)
+    for i, j in zip(row_indices, col_indices):
+        assignment[i] = j + 1  # +1 for MATLAB-style 1-indexing
+
+    return assignment, total_cost
+
+
+def read_frame(cap, frame_number):
+    """
+    Read a specific frame from the video capture object.
+    """
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+    ret, frame = cap.read()
+    if not ret:
+        raise Exception(f"Failed to read frame {frame_number}")
+    return frame
+
+
+def yolo_detections_to_centers(detections):
+    """
+    Convert YOLO detections (bounding boxes) to center points.
+    
+    Args:
+        detections: List of detection dictionaries with 'bbox' keys
+        
+    Returns:
+        numpy array of shape (n_detections, 2) with center coordinates
+    """
+    if not detections:
+        return np.array([]).reshape(0, 2)
+    
+    centers = []
+    for detection in detections:
+        bbox = detection['bbox']  # [x1, y1, x2, y2]
+        center_x = (bbox[0] + bbox[2]) / 2
+        center_y = (bbox[1] + bbox[3]) / 2
+        centers.append([center_x, center_y])
+    
+    return np.array(centers)
+
+
+def main():
+    """
+    Main function for YOLO-based fly tracking.
+    """
+    # Clear all variables and close plots
+    u = 0  # acceleration magnitude
+    dt = 1  # sampling rate
+    S_frame = 5  # starting frame
+    HexAccel_noise_mag = 1  # process noise magnitude
+    ## Define update equations in 2D
+    # State transition matrix
+    A = np.array([
+        [1, 0, dt, 0],
+        [0, 1, 0, dt],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1]
+    ])
+    
+    # Control input matrix
+    B = np.array([[dt**2/2], [dt**2/2], [dt], [dt]])
+    
+    # Measurement function matrix
+    C = np.array([[1, 0, 0, 0], [0, 1, 0, 0]])
+
+    Q_loc_meas = []  # fly detections
+    tkn_x = 0.1  # measurement noise in x direction
+    tkn_y = 0.1  # measurement noise in y direction
+
+    Ez = np.array([[tkn_x, 0], [0, tkn_y]])
+    # Process noise covariance matrix
+    Ex = np.array([
+        [dt**4/4, 0, dt**3/2, 0],
+        [0, dt**4/4, 0, dt**3/2],
+        [dt**3/2, 0, dt**2, 0],
+        [0, dt**3/2, 0, dt**2]
+    ]) * HexAccel_noise_mag**2
+    P = Ex.copy()  # initial position variance estimate
+
+    plt.close('all')
+
+    # Initialize YOLO detector
+    print("Initializing YOLO detector...")
+    detector = YOLODetector(model_path="./models/yolov7-e6e.pt", confidence_threshold=0.1)
+    print("YOLO detector initialized successfully!")
+
+    # Open the video file
+    video_path = "flies.webm"
+    cap = cv2.VideoCapture(video_path)
+
+    # Get total number of frames
+    f_list = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    print(f"Found {f_list} frames in the video.")
+
+    ## Initialize Kalman filters for multiple tracks
+    kalman_filters = []
+    track_strikes = []
+    MAX_TRACKS = 2000
+    track_estimate_count = 0
+    Q_estimate = np.full((4, MAX_TRACKS), np.nan)
+
+    Q_estimate = np.full((4, 2000), np.nan)
+    Q_loc_estimateX = np.full((f_list, 2000), np.nan)
+    Q_loc_estimateY = np.full((f_list, 2000), np.nan)
+
+    strk_trks = np.zeros(2000)  # strike counter for tracks
+
+    MAX_FRAME = 50
+    for t in range(5, MAX_FRAME):
+        print(f"Processing frame {t}")
+
+        # Read the current frame
+        try:
+            frame = read_frame(cap, t)
+        except Exception as e:
+            print(f"Error reading frame {t}: {e}")
+            continue
+
+        # Detect objects using YOLO
+        detection_count = 0
+        try:
+            detections = detector.detect_objects(frame)
+            
+            # Convert YOLO tections to center points
+            detections_centers = yolo_detections_to_centers(detections)
+                
+        except Exception as e:
+            print(f"Error detecting objects in frame {t}: {e}")
+            detections_centers = np.array([]).reshape(0, 2)
+
+        if len(detections_centers) > 0:
+            detection_count = len(detections_centers)
+            Q_loc_meas = np.column_stack([detections_centers[:, 0], detections_centers[:, 1]])
+
+        print(f"detection_count: {detection_count}")
+
+
+        ## Kalman filter prediction
+        for n_estimate in range(track_estimate_count):
+            if not np.isnan(Q_estimate[0, n_estimate]):
+                Q_estimate[:, n_estimate] = A @ Q_estimate[:, n_estimate] + (B * u).flatten()
+
+        P = A @ P @ A.T + Ex
+        K = P @ C.T @ np.linalg.inv(C @ P @ C.T + Ez)
+
+        if detection_count > 0 and track_estimate_count > 0:
+            # Create distance matrix
+            active_tracks = []
+            active_positions = []
+
+            for n_estimate in range(track_estimate_count):
+                if not np.isnan(Q_estimate[0, n_estimate]):
+                    active_tracks.append(n_estimate)
+                    active_positions.append([Q_estimate[0, n_estimate], Q_estimate[1, n_estimate]])
+
+            if len(active_positions) > 0:
+                active_positions = np.array(active_positions)
+
+                # Calculate distances between tracks and detections
+                all_points = np.vstack([active_positions, Q_loc_meas])
+                distances = squareform(pdist(all_points))
+                est_dist = distances[:len(active_positions), len(active_positions):]
+
+                # Optimal assignment
+                asgn, cost = assignment_optimal(est_dist)
+
+                # Reject assignments that are too far (distance > 50)
+                rej = np.zeros(len(asgn), dtype=bool)
+                for i, assignment in enumerate(asgn):
+                    if assignment > 0:
+                        if est_dist[i, assignment-1] < 50:  # -1 for 0-indexing
+                            rej[i] = True
+
+                asgn = asgn * rej.astype(int)
+
+                # Apply updates
+                for i, (n_estimate, assignment) in enumerate(zip(active_tracks, asgn)):
+                    if assignment > 0:
+                        measurement = Q_loc_meas[assignment-1, :]  # -1 for 0-indexing
+                        innovation = measurement - C @ Q_estimate[:, n_estimate]
+                        Q_estimate[:, n_estimate] = Q_estimate[:, n_estimate] + K @ innovation
+        else:
+            asgn = np.array([])
+
+        # Update covariance
+        P = (np.eye(4) - K @ C) @ P
+
+        ## Store data
+        Q_loc_estimateX[t, :track_estimate_count] = Q_estimate[0, :track_estimate_count]
+        Q_loc_estimateY[t, :track_estimate_count] = Q_estimate[1, :track_estimate_count]
+
+        ## Handle new detections and lost tracks
+        if detection_count > 0:
+            # Find unassigned detections (new tracks)
+            if len(asgn) > 0:
+                assigned_detections = asgn[asgn > 0] - 1  # Convert to 0-indexing
+                unassigned = []
+                for i in range(detection_count):
+                    if i not in assigned_detections:
+                        unassigned.append(i)
+            else:
+                unassigned = list(range(detection_count))
+
+            # Create new tracks for unassigned detections
+            if unassigned:
+                new_positions = Q_loc_meas[unassigned, :]
+                n_new = len(unassigned)
+
+                # Add new tracks
+                Q_estimate[0, track_estimate_count:track_estimate_count+n_new] = new_positions[:, 0]
+                Q_estimate[1, track_estimate_count:track_estimate_count+n_new] = new_positions[:, 1]
+                Q_estimate[2, track_estimate_count:track_estimate_count+n_new] = 0  # zero velocity
+                Q_estimate[3, track_estimate_count:track_estimate_count+n_new] = 0  # zero velocity
+
+                track_estimate_count += n_new
+
+        # Give strikes to unmatched tracks
+        if len(asgn) > 0:
+            no_match = np.where(asgn == 0)[0]
+            if len(no_match) > 0:
+                active_track_indices = [i for i in range(min(track_estimate_count, len(strk_trks)))
+                                      if not np.isnan(Q_estimate[0, i])]
+                for idx in no_match:
+                    if idx < len(active_track_indices):
+                        track_idx = active_track_indices[idx]
+                        strk_trks[track_idx] += 1
+
+        # Remove tracks with too many strikes
+        bad_tracks = np.where(strk_trks > 6)[0]
+        if len(bad_tracks) > 0:
+            Q_estimate[:, bad_tracks] = np.nan
+
+    # Save results
+    results = {
+        'Q_loc_estimateX': Q_loc_estimateX,
+        'Q_loc_estimateY': Q_loc_estimateY
+    }
+
+    print("Tracking complete!")
+
+    track_colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0),
+                    (127, 127, 255), (255, 0, 255), (255, 127, 255),
+                    (127, 0, 255), (127, 0, 127), (127, 10, 255), (0, 255, 127)]
+    while True:
+        for frame_idx in range(S_frame, MAX_FRAME):
+            center_x = Q_loc_estimateX[frame_idx,:]
+            center_y = Q_loc_estimateY[frame_idx,:]
+            frame = read_frame(cap, frame_idx)
+
+            for track_idx in range(Q_loc_estimateX.shape[1]):
+                color = track_colors[track_idx%len(track_colors)]
+                if np.isnan(center_x[track_idx]) or np.isnan(center_y[track_idx]):
+                    continue
+
+                x = int(center_x[track_idx])
+                y = int(center_y[track_idx])
+                tl = (y - 10, x - 10)
+                br = (y + 10, x + 10)
+                cv2.rectangle(frame, tl, br, color, 1)
+                cv2.putText(frame, str(track_idx), (y - 20, x - 10), 0, 0.5,color, 2)
+                for k in range(10):
+                    x1 = Q_loc_estimateX[frame_idx - k, track_idx]
+                    y1 = Q_loc_estimateY[frame_idx - k, track_idx]
+                    if np.isnan(x1) or np.isnan(y1):
+                        break
+
+                    x1 = int(x1)
+                    y1 = int(y1)
+
+                    cv2.circle(frame, (y1, x1), 3, color, 1)
+                cv2.circle(frame, (y, x), 6, color, 1)
+
+            cv2.imshow('image', frame)
+            time.sleep(0.1)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                cv2.destroyAllWindows()
+                break
+ 
+
+
+if __name__ == "__main__":
+    main()
