@@ -19,7 +19,7 @@ def test_detect_objects_monkeypatched(monkeypatch):
 
     import fly_track_rewrite as mod
 
-    monkeypatch.setattr(mod, "find_objects", fake_find_objects)
+    monkeypatch.setattr(mod, "find_objects_canny", fake_find_objects)
     detections = detect_objects(np.zeros((50, 50, 3), dtype=np.uint8))
     assert detections.shape == (2, 2)
     assert np.array_equal(detections, np.array([[10, 30], [20, 40]]))
