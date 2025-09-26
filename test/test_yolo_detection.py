@@ -8,7 +8,7 @@ from yolo_detector import YOLODetector
 class TestYoloDetection:
     @pytest.fixture(scope="class")
     def detector(self):
-        detector = YOLODetector(model_path = "./models/yolov7-e6e.pt")
+        detector = YOLODetector("yolov7-e6e.pt")
         return detector
 
     def test_detect_objects(self, detector):

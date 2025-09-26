@@ -13,7 +13,7 @@ class TestYOLODetector:
             self.mock_model.names = {0: 'person', 1: 'bicycle', 2: 'car', 3: 'motorcycle', 4: 'airplane', 5: 'bus', 6: 'train', 7: 'truck', 8: 'boat', 9: 'traffic light'}
             mock_yolo.return_value = self.mock_model
             
-            self.detector = YOLODetector(model_path="./models/yolov7-e6e.pt")
+            self.detector = YOLODetector("yolov7-e6e.pt")
             self.mock_yolo = mock_yolo
             yield
 

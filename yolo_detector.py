@@ -11,52 +11,13 @@ import numpy as np
 import cv2
 
 class YOLODetector:
-    def __init__(self, model_path: str, confidence_threshold: float = 0.5):
+    def __init__(self, model_name: str, confidence_threshold: float = 0.5):
         self.confidence_threshold = confidence_threshold
-        self.model_path = model_path
         self.model = None
-        
-        if model_path and os.path.exists(model_path):
-            try:
-                # Try to load the model directly
-                self.model = YOLO(model_path)
-                
-            except Exception as e:
-                print(f"Warning: Could not load model {model_path}: {e}")
-                print("Attempting to load with environment variable workaround...")
-                try:
-                    # Set environment variable to bypass the missing module check
-                    os.environ['ULTRALYTICS_OFFLINE'] = '1'
-                    self.model = YOLO(model_path)
-                    
-                except Exception as e2:
-                    print(f"Environment workaround failed: {e2}")
-                    print("Attempting to load with legacy compatibility...")
-                    try:
-                        # Try with legacy loading and ignore warnings
-                        import warnings
-                        with warnings.catch_warnings():
-                            warnings.simplefilter("ignore")
-                            # Try to patch the missing module temporarily
-                            import sys
-                            from types import ModuleType
-                            
-                            # Create a dummy models.yolo module
-                            dummy_module = ModuleType('models.yolo')
-                            sys.modules['models.yolo'] = dummy_module
-                            
-                            self.model = YOLO(model_path)
-                            
-                    except Exception as e3:
-                        print(f"Legacy loading failed: {e3}")
-                        print("Falling back to a default YOLO model...")
-                        try:
-                            # Try to load a default YOLO model instead
-                            self.model = YOLO('yolov8n.pt')  # This will download if not available
-                        except Exception as e4:
-                            raise Exception(f"Could not load any YOLO model: {e4}")
-        else:
-            raise Exception("No model path found: " + model_path)
+        try:
+            self.model = YOLO(model_name)  # This will download if not available
+        except:
+            self.model = YOLO('yolov8n.pt')  # This will download if not available
 
     def detect_objects(self, image: np.ndarray) -> list:
         """

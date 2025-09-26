@@ -49,8 +49,8 @@ def yolo_detections_to_centers(detections):
     centers = []
     for detection in detections:
         bbox = detection['bbox']  # [x1, y1, x2, y2]
-        center_x = (bbox[0] + bbox[2]) / 2
-        center_y = (bbox[1] + bbox[3]) / 2
+        center_y = (bbox[0] + bbox[2]) / 2
+        center_x = (bbox[1] + bbox[3]) / 2
         centers.append([center_x, center_y])
     
     return np.array(centers)
@@ -98,7 +98,7 @@ def main():
 
     # Initialize YOLO detector
     print("Initializing YOLO detector...")
-    detector = YOLODetector(model_path="./models/yolov7-e6e.pt", confidence_threshold=0.1)
+    detector = YOLODetector("yolov7-e6e.pt", confidence_threshold=0.1)
     print("YOLO detector initialized successfully!")
 
     # Open the video file
