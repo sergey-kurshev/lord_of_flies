@@ -4,3 +4,7 @@ opencv-python
 scipy
 scikit-image
 pytest
+# YOLOv7
+torch
+torchvision
+ultralytics

@@ -5,14 +5,14 @@ from fly_detect import find_objects, extrema2d, detect_edges, find_objects_canny
 
 def test_detect_edges():
     # Load the test frame
-    img = cv2.imread('frame.jpg', cv2.IMREAD_GRAYSCALE)
-    assert img is not None, "Failed to load frame.jpg"
+    img = cv2.imread('test/frame.jpg', cv2.IMREAD_GRAYSCALE)
+    assert img is not None, "Failed to load test/frame.jpg"
 
     # Call detect_edges
     edges = detect_edges(img)
 
     # Check output shape matches input
-    assert edges.shape == img.shape, "Output shape mismatch"
+    assert edges.shape== img.shape[:2] , "Output shape mismatch"
 
     # Check if edges contain non-zero values
     assert np.any(edges > 0), "No edges detected"
@@ -36,8 +36,8 @@ def test_extrema2d():
 
 def test_find_objects():
     # Load the test frame
-    img = cv2.imread('frame.jpg', cv2.IMREAD_GRAYSCALE)
-    assert img is not None, "Failed to load frame.jpg"
+    img = cv2.imread('test/frame.jpg', cv2.IMREAD_GRAYSCALE)
+    assert img is not None, "Failed to load test/frame.jpg"
 
     # Call find_objects
     X, Y = find_objects(img)
