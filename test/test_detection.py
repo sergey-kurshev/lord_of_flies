@@ -12,7 +12,7 @@ def test_detect_edges():
     edges = detect_edges(img)
 
     # Check output shape matches input
-    assert edges.shape == img.shape, "Output shape mismatch"
+    assert edges.shape== img.shape[:2] , "Output shape mismatch"
 
     # Check if edges contain non-zero values
     assert np.any(edges > 0), "No edges detected"
